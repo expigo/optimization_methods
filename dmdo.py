@@ -3,7 +3,10 @@ from sympy import symbols, diff
 from matplotlib import pyplot as plt
 from scipy.optimize import fmin, minimize
 
-plt.xkcd()
+
+plt.axis([0, 20, 0, 50])
+
+# plt.xkcd()
 def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25):
 
     # Min <- J = 1/2 E(qxi^2+rui^2) + (1/2)fxN^2
@@ -15,23 +18,23 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25):
     f = 1.5
 
     n_iter = K
-    epsilon = 1e-1
+    epsilon = 1e-2
 
     X = np.empty(shape=(n_iter, N + 1))
     P = np.empty(shape=(n_iter, N))
     B = np.empty(shape=(n_iter, 1))
     U = np.empty(shape=(n_iter, N))
-    J = np.empty(shape=(len(ts), n_iter))
+    J = np.zeros(shape=(len(ts), n_iter))
     d =np.empty(shape=(n_iter, N))
 
     # u = np.random.uniform(low=0, high=20, size=N)  # 1st control randomization
     x_0 = 2
 
-    use_CG = False        # use conjugate method
+    use_CG = cg        # use conjugate method
     optimize_t = opt_t    # use optimized step value
-    u = np.array([2, 16, 2, 8, 4])  # same as in the initial test
 
-    for idx, t in enumerate(ts):
+    def _optimize(t):
+        nonlocal u
         for i in range(n_iter):
 
             x = np.insert(x_0 + np.cumsum(u) / 2, 0, x_0)  # calculate controls
@@ -46,11 +49,12 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25):
             B[i] = norm  # store for convenience
 
             if norm < epsilon:  # stop condition
-                print(f'Optimal solution found after {i} iterations (epsilon={epsilon} | norm={norm})')
+                print(f'Optimal solution found after {i} iterations (epsilon={epsilon} | norm={norm} | t={t if t else "optimal"})')
+                J[idx, i:] = J[idx,i-1]
                 break
 
             additional_comp = (1 / 2) * (3 / 2) * x[-1] ** 2
-            J_curr = np.sum(q * x[:-1] ** 2 + r * u ** 2) / 2 + (1 / 2) * (3 / 2) * x[-1] ** 2
+            J_curr = np.sum(x[:-1] ** 2 + (1/2) * u ** 2) / 2 + (1 / 2) * (3 / 2) * x[-1] ** 2
             J[idx, i] = J_curr
 
             if optimize_t:
@@ -67,8 +71,8 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25):
                     return (1 / 2) * np.sum(x_next[:-1] ** 2 + (1 / 2) * u_next ** 2) + (3 / 4) * u_next[-1] ** 2
 
                 t = minimize(fun=Jt, method="Nelder-Mead", x0=0).x
-                if t == 0:
-                    print(f'Optimal solution found after {i} iterations (epsilon={epsilon} | norm={norm})')
+                #if t == 0:
+                #    print(f'Optimal solution found after {i} iterations (epsilon={epsilon} | norm={norm})')
 
                 print(t)
 
@@ -86,6 +90,22 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25):
                 u = u - t * b
                 U[i, :] = u
 
-        plt.plot(J[idx,:], label=f't={t}')
-        plt.legend()
-        plt.show()
+        #plt.plot(J[idx, :], label=f't={t}')
+
+
+    if opt_t:
+        u = np.array([2, 16, 2, 8, 4])  # same as in the initial test
+        idx = 0
+        _optimize(None)
+        plt.plot(J[idx, :], label=f't-optimized')
+
+    else:
+        for idx, t in enumerate(ts):
+            u = np.array([2, 16, 2, 8, 4])  # same as in the initial test
+            _optimize(t)
+            plt.plot(J[idx, :], label=f't={t}')
+
+    plt.xticks(np.arange(0, 50, step=2))
+    plt.legend()
+    plt.show()
+    print()
