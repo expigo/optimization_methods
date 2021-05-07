@@ -10,7 +10,7 @@ from scipy.optimize import fmin, minimize
 plt.style.use("ggplot")
 
 
-def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25, multimode=False):
+def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25, e=0.01, multimode=False):
     # Min <- J = 1/2 E(qxi^2+rui^2) + (1/2)fxN^2
     N = 5
     a = 1
@@ -20,23 +20,25 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25, multimode=False):
     f = 1.5
 
     n_iter = K
-    epsilon = 15e-2
+    epsilon = e
 
     X = np.zeros(shape=(n_iter, N + 1))
     P = np.zeros(shape=(n_iter, N))
     B = np.zeros(shape=(n_iter, 1))
     U = np.zeros(shape=(n_iter, N))
-    J = np.zeros(shape=(len(ts), n_iter))
+    print(ts, multimode)
+    J = np.zeros(shape=(4 if multimode else len(ts), n_iter))
     d = np.zeros(shape=(n_iter, N))
 
-    # u = np.random.uniform(low=0, high=20, size=N)  # 1st control randomization
     x_0 = 2
 
-    #use_CG = cg        # use conjugate method
-    #optimize_t = opt_t    # use optimized step value
+    def _optimize(t, use_CG=cg, optimize_t=opt_t, epsilon=epsilon, init_control=False):
+        # nonlocal u
+        if not init_control:
+            u = np.random.uniform(low=0, high=20, size=N)  # 1st control randomization
+        else:
+            u = np.array([2, 16, 2, 8, 4])  # same as in the initial test
 
-    def _optimize(t, use_CG=cg, optimize_t=opt_t, epsilon=epsilon):
-        nonlocal u
         for i in range(n_iter):
 
             x = np.insert(x_0 + np.cumsum(u) / 2, 0, x_0)  # calculate controls
@@ -52,18 +54,15 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25, multimode=False):
 
             if norm < epsilon:  # stop condition
                 print(f'Optimal solution found after {i} iterations '
-                      f'(method: {"Direct" if not use_CG else "Conjugated"} Gradient | epsilon={epsilon} | norm={norm} | t={t if not optimize_t else "optimal"})')
-                J[idx, i:] = J[idx,i-1]
+                      f'(method: {"Direct" if not use_CG else "Conjugated"} Gradient |'
+                      f' epsilon={epsilon} | norm={norm} | t={t if not optimize_t else "optimal"})')
+                J[idx, i:] = J[idx, i-1]
                 break
 
-            additional_comp = (1 / 2) * (3 / 2) * x[-1] ** 2
             J_curr = np.sum(x[:-1] ** 2 + (1/2) * u ** 2) / 2 + (1 / 2) * (3 / 2) * x[-1] ** 2
             J[idx, i] = J_curr
 
             if optimize_t:
-                # J_t = lambda t: (np.sum((x[:-1] + (u-t*b)/2)**2 + ((u-t*b)**2)/2))/2 +\
-                #                 (3/4) * ((x_0 + np.cumsum(u-t*b)/2)[-1])**2
-
                 J_t = lambda t: (np.sum(
                     (np.insert(x_0 + np.cumsum(u) / 2, 0, x_0))[:-1] ** 2 + ((u - t * b) ** 2) / 2)) / 2 + \
                                 (3 / 4) * ((x_0 + np.cumsum(u - t * b) / 2)[-1]) ** 2
@@ -74,10 +73,6 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25, multimode=False):
                     return (1 / 2) * np.sum(x_next[:-1] ** 2 + (1 / 2) * u_next ** 2) + (3 / 4) * x_next[-1] ** 2
 
                 t = minimize(fun=Jt, method="Nelder-Mead", x0=0).x
-                #if t == 0:
-                #    print(f'Optimal solution found after {i} iterations (epsilon={epsilon} | norm={norm})')
-
-                # print(i, t, B[i])
 
             if use_CG:
                 if i == 0:
@@ -93,35 +88,32 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25, multimode=False):
                 u = u - t * b
                 U[i, :] = u
 
-        #plt.plot(J[idx, :], label=f't={t}')
-
     if multimode:
-        J = np.zeros(shape=(4, n_iter))
+        # J = np.zeros(shape=(4, n_iter))
 
-        idx=0
-        u = np.array([2, 16, 2, 8, 4])  # same as in the initial test
-        _optimize(epsilon=1e-5, t=ts[0], use_CG=False, optimize_t=False)
-        plt.plot(J[idx, :], label=f't={ts}')
+        options = np.array([0, 1, 2, 3])
+        options_binary = ((options.reshape(-1, 1) & (2 ** np.arange(2))) != 0).astype(int)
+        # print(options_binary)
+        # print(options_binary[:, ::-1])
+        # options_binary format: [ [0,0], [0,1], [1,0], [1,1] ]
+        # each entry consists of two boolean values:
+        # 1st is connected to the use of conjugated method
+        # 2nd decides whether or not to optimize t:
+        # [0,0]: Direct Gradient, no optimizations
+        # [0,1]: Direct Gradient, step optimized
+        # [1,0]: Conjugated Gradient, no optimizations
+        # [1,1]: Conjugated Gradient, step optimized
 
-        idx=1
-        u = np.array([2, 16, 2, 8, 4])  # same as in the initial test
-        _optimize(epsilon=1e-5, t=ts[0], use_CG=True, optimize_t=False)
-        plt.plot(J[idx, :], label=f't={ts} [Conjugate]')
-
-        idx=2
-        u = np.array([2, 16, 2, 8, 4])  # same as in the initial test
-        _optimize(epsilon=1e-5, t=ts[0], use_CG=False, optimize_t=True)
-        plt.plot(J[idx, :], label=f't-optimized')
-
-        idx=3
-        u = np.array([2, 16, 2, 8, 4])  # same as in the initial test
-        _optimize(epsilon=1e-5, t=ts[0], use_CG=True, optimize_t=True)
-        plt.plot(J[idx, :], label=f't-optimized [Conjugate]')
+        for idx, (use_cg, opt_t) in enumerate(options_binary):
+            _optimize(epsilon=1e-5, t=ts[0], use_CG=use_cg, optimize_t=opt_t, init_control=[2, 16, 2, 8, 4])
+            l_1 = f't={ts if not opt_t else "optimized"}'
+            l_2 = " [Conjugated]" if use_cg else "[Direct]"
+            plt.plot(J[idx, :], label=f'{l_1 + l_2}')
 
         plt.title("Mix")
         plt.xlabel("Iteration")
         plt.ylabel("Performance Index")
-        xlim = 20
+        xlim = 20 if K >= 20 else K
         ylim = 40
         plt.xticks(np.arange(0, xlim, step=1))
         plt.yticks(np.arange(0, ylim, step=2))
@@ -133,11 +125,10 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25, multimode=False):
 
     else:
         for idx, t in enumerate(ts):
-            u = np.array([2, 16, 2, 8, 4])  # same as in the initial test
             if opt_t:
                 _optimize(t, optimize_t=True)
                 plt.plot(J[idx, :], label=f't-optimal')
-                xlim = 20
+                xlim = 20 if K >= 20 else K
                 ylim = 50
                 plt.xticks(np.arange(0, xlim, step=1))
                 plt.yticks(np.arange(0, ylim, step=2))
@@ -148,14 +139,12 @@ def dmdo(cg=False, opt_t=False, ts=[45e-2], K=25, multimode=False):
             else:
                 _optimize(t, optimize_t=False)
                 plt.plot(J[idx, :], label=f't={t}')
-                xlim, dx = (20, 1) if cg else (30, 1)
+                xlim, dx = (20 if K >= 20 else K, 1) if cg else (30 if K >= 30 else K, 1)
                 ylim = 50
                 plt.xticks(np.arange(0, xlim, step=dx))
                 plt.yticks(np.arange(0, ylim, step=2))
                 plt.xlim((0, xlim))
                 plt.ylim((0, ylim))
-
-            # plt.plot(J[idx, :], label=f't={t}')
 
         # plt.tight_layout()
         plt.title(f'{"Conjugated" if cg else "Direct"} Gradient')
